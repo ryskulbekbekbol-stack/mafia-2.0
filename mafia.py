@@ -6,6 +6,7 @@ import sys
 import logging
 import random
 import asyncio
+import traceback
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
@@ -22,11 +23,19 @@ if not BOT_TOKEN:
 ADMIN_IDS = [123456789]  # Замените на свои ID (можно узнать у @userinfobot)
 # =====================
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 
-bot = Bot(token=BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+print("✅ Бот: импорты выполнены, токен получен", file=sys.stderr)
+
+try:
+    bot = Bot(token=BOT_TOKEN)
+    storage = MemoryStorage()
+    dp = Dispatcher(bot, storage=storage)
+    print("✅ Бот: объекты Bot и Dispatcher созданы", file=sys.stderr)
+except Exception as e:
+    print(f"❌ Ошибка при создании бота: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
 
 games = {}
 
@@ -480,9 +489,18 @@ async def debug_handler(message: types.Message):
     print(f"📩 Получено сообщение: {message.text} от {message.from_user.id}", file=sys.stderr)
 
 async def on_startup(dp):
-    await bot.delete_webhook()
-    print("✅ Webhook удалён, запускаем polling...", file=sys.stderr)
+    try:
+        await bot.delete_webhook()
+        print("✅ Webhook удалён, запускаем polling...", file=sys.stderr)
+    except Exception as e:
+        print(f"❌ Ошибка при удалении webhook: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
 
 if __name__ == '__main__':
     print("✅ Бот запускается...", file=sys.stderr)
-    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
+    try:
+        executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
+    except Exception as e:
+        print(f"❌ Ошибка в polling: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
