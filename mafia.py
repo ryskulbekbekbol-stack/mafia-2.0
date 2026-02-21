@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
 import logging
 import random
 import asyncio
+import os
+import sys
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
@@ -13,8 +14,14 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 # ===== НАСТРОЙКИ =====
-BOT_TOKEN = os.getenv("BOT_TOKEN")       # Замени на свой токен от @BotFather
-ADMIN_IDS = [123456789]            # Список ID администраторов (могут останавливать любую игру)
+# Токен берётся из переменной окружения BOT_TOKEN (обязательно задать на Railway)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    print("❌ Ошибка: переменная окружения BOT_TOKEN не задана!", file=sys.stderr)
+    sys.exit(1)
+
+# Список ID администраторов (кто может останавливать любую игру)
+ADMIN_IDS = [123456789]  # Замените на свои ID (можно узнать у @userinfobot)
 # =====================
 
 logging.basicConfig(level=logging.INFO)
@@ -271,6 +278,7 @@ async def mafia_chat(message: types.Message, state: FSMContext):
 # ===== КОМАНДЫ =====
 @dp.message_handler(commands=['start', 'help'])
 async def cmd_start(message: types.Message):
+    print(f"🔥 Команда /start от {message.from_user.id}", file=sys.stderr)
     await message.answer(
         "👋 Привет! Я бот для игры в Мафию (20 ролей).\n\n"
         "Команды:\n"
@@ -532,6 +540,4 @@ async def vote_callback(callback: types.CallbackQuery):
     await callback.answer("Голос учтён.")
     await callback.message.edit_text(f"✅ Ты проголосовал за {game.players[target_id]['name']}.")
 
-# ===== ЗАПУСК =====
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+# ===== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ДЛЯ ОТЛАД
