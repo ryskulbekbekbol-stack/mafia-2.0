@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import logging
 import random
 import asyncio
@@ -12,7 +13,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 # ===== НАСТРОЙКИ =====
-BOT_TOKEN = "YOUR_BOT_TOKEN"       # Замени на свой токен от @BotFather
+BOT_TOKEN = os.getenv("BOT_TOKEN")       # Замени на свой токен от @BotFather
 ADMIN_IDS = [123456789]            # Список ID администраторов (могут останавливать любую игру)
 # =====================
 
