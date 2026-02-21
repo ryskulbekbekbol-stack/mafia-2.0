@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
+import sys
 import logging
 import random
 import asyncio
-import os
-import sys
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
@@ -14,13 +14,11 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 # ===== НАСТРОЙКИ =====
-# Токен берётся из переменной окружения BOT_TOKEN (обязательно задать на Railway)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     print("❌ Ошибка: переменная окружения BOT_TOKEN не задана!", file=sys.stderr)
     sys.exit(1)
 
-# Список ID администраторов (кто может останавливать любую игру)
 ADMIN_IDS = [123456789]  # Замените на свои ID (можно узнать у @userinfobot)
 # =====================
 
@@ -30,10 +28,8 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# Хранилище игр по chat_id
 games = {}
 
-# ===== ВСЕ РОЛИ (20 штук) =====
 ALL_ROLES = [
     'мафия', 'дон', 'комиссар', 'доктор', 'любовница', 'маньяк',
     'адвокат', 'шериф', 'якудза', 'путана', 'вор', 'бомж',
@@ -41,25 +37,23 @@ ALL_ROLES = [
     'журналист', 'бессмертный', 'оборотень', 'мирный'
 ]
 
-# Роли, которые действуют ночью (для рассылки инлайн-клавиатур)
 NIGHT_ROLES = [
     'мафия', 'дон', 'комиссар', 'доктор', 'любовница', 'маньяк',
     'путана', 'вор', 'дед мороз', 'самоубийца', 'телохранитель',
     'снайпер', 'журналист', 'оборотень'
 ]
 
-# ===== КЛАСС ИГРЫ =====
 class MafiaGame:
     def __init__(self, chat_id, creator_id):
         self.chat_id = chat_id
         self.creator_id = creator_id
-        self.players = {}          # user_id -> {'name':, 'role':, 'alive':}
+        self.players = {}
         self.phase = 'registration'
-        self.night_actions = {}     # ночные действия
-        self.day_votes = {}         # голоса днём
-        self.sniper_used = False    # снайпер уже стрелял?
-        self.immortal_alive = True  # бессмертный жив?
-        self.yakuza_avenged = False # якудза уже мстил?
+        self.night_actions = {}
+        self.day_votes = {}
+        self.sniper_used = False
+        self.immortal_alive = True
+        self.yakuza_avenged = False
 
     def add_player(self, user_id, name):
         if user_id not in self.players and len(self.players) < 20:
@@ -79,30 +73,22 @@ class MafiaGame:
         players_list = list(self.players.keys())
         random.shuffle(players_list)
         num = len(players_list)
-
-        # Определяем количество мафии (≈1/3)
         num_mafia = max(1, num // 3)
 
-        # Формируем пул ролей
         roles_pool = []
-        # Мафия и дон
         for i in range(num_mafia):
             roles_pool.append('дон' if i == 0 else 'мафия')
-        # Уникальные роли (каждой по одной, пока хватает мест)
         unique_roles = [r for r in ALL_ROLES if r not in ('мафия', 'дон', 'мирный')]
         random.shuffle(unique_roles)
         for r in unique_roles:
             if len(roles_pool) < num:
                 roles_pool.append(r)
-        # Остальное – мирные
         while len(roles_pool) < num:
             roles_pool.append('мирный')
-
         random.shuffle(roles_pool)
 
         for uid, role in zip(players_list, roles_pool):
             self.players[uid]['role'] = role
-
         self.phase = 'night'
         return True
 
@@ -112,7 +98,6 @@ class MafiaGame:
     def get_players_by_role(self, role, alive_only=True):
         return [uid for uid, p in self.players.items() if p['role'] == role and (not alive_only or p['alive'])]
 
-    # ===== НОЧНЫЕ ДЕЙСТВИЯ =====
     def set_mafia_kill(self, target_id):
         self.night_actions['mafia_kill'] = target_id
 
@@ -131,10 +116,10 @@ class MafiaGame:
     def set_maniac_kill(self, target_id):
         self.night_actions['maniac_kill'] = target_id
 
-    def set_hooker(self, target_id):   # путана
+    def set_hooker(self, target_id):
         self.night_actions['hooker'] = target_id
 
-    def set_thief(self, target_id):     # вор
+    def set_thief(self, target_id):
         self.night_actions['thief'] = target_id
 
     def set_frost_protect(self, target_id):
@@ -149,7 +134,6 @@ class MafiaGame:
     def set_werewolf_kill(self, target_id):
         self.night_actions['werewolf_kill'] = target_id
 
-    # ===== РАЗРЕШЕНИЕ НОЧИ =====
     def resolve_night(self):
         killed = set()
         blocked = set()
@@ -157,56 +141,39 @@ class MafiaGame:
 
         if 'lover_block' in self.night_actions:
             blocked.add(self.night_actions['lover_block'])
-
         if 'doctor_heal' in self.night_actions:
             healed = self.night_actions['doctor_heal']
-
-        # Маньяк
         if 'maniac_kill' in self.night_actions:
             target = self.night_actions['maniac_kill']
             if target not in blocked:
                 killed.add(target)
-
-        # Оборотень
         if 'werewolf_kill' in self.night_actions:
             target = self.night_actions['werewolf_kill']
             if target not in blocked:
                 killed.add(target)
-
-        # Самоубийца
         if 'suicide_kill' in self.night_actions:
             target = self.night_actions['suicide_kill']
             suicide_id = self.get_players_by_role('самоубийца', alive_only=True)
             if suicide_id and suicide_id[0] not in killed and suicide_id[0] not in blocked:
                 killed.add(suicide_id[0])
                 killed.add(target)
-
-        # Мафия
         if 'mafia_kill' in self.night_actions:
             target = self.night_actions['mafia_kill']
             if target not in blocked and self.players[target]['role'] != 'бомж':
                 killed.add(target)
-
-        # Лечение
         if healed and healed in killed:
             killed.remove(healed)
-
-        # Бессмертный
         immortal_id = self.get_players_by_role('бессмертный', alive_only=True)
         if immortal_id and immortal_id[0] in killed:
             killed.remove(immortal_id[0])
             self.immortal_alive = True
-
-        # Якудза: если убит, убивает убийцу (упрощённо – любого случайного из мафии)
         for uid in list(killed):
             if self.players[uid]['role'] == 'якудза' and not self.yakuza_avenged:
-                # Находим любого живого мафиози
                 mafia_list = self.get_players_by_role('мафия', alive_only=True) + self.get_players_by_role('дон', alive_only=True)
                 if mafia_list:
                     avenger = random.choice(mafia_list)
                     killed.add(avenger)
                 self.yakuza_avenged = True
-
         return list(killed)
 
     def apply_deaths(self, killed_ids):
@@ -221,7 +188,6 @@ class MafiaGame:
         alive = self.alive_players()
         if not alive:
             return 'никто'
-
         mafia_count = 0
         don_count = 0
         maniac_count = 0
@@ -239,7 +205,6 @@ class MafiaGame:
                 werewolf_count += 1
             else:
                 peaceful += 1
-
         if mafia_count == 0 and maniac_count == 0 and werewolf_count == 0:
             return 'мирные'
         if peaceful == 0 and maniac_count == 0 and werewolf_count == 0:
@@ -250,20 +215,12 @@ class MafiaGame:
             return 'оборотень'
         return None
 
-
-# ===== СОСТОЯНИЯ FSM (не используются, но можно расширить) =====
-class MafiaStates(StatesGroup):
-    night_action = State()
-    day_vote = State()
-
-# ===== ОБЩЕНИЕ МАФИИ (в личке) =====
 @dp.message_handler(lambda message: message.chat.type == 'private', state='*')
 async def mafia_chat(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     text = message.text
     if not text.startswith('!м'):
         return
-
     for game in games.values():
         if user_id in game.players and game.players[user_id]['alive'] and game.players[user_id]['role'] in ('мафия', 'дон'):
             members = game.get_players_by_role('мафия', alive_only=True) + game.get_players_by_role('дон', alive_only=True)
@@ -275,7 +232,6 @@ async def mafia_chat(message: types.Message, state: FSMContext):
                         pass
             break
 
-# ===== КОМАНДЫ =====
 @dp.message_handler(commands=['start', 'help'])
 async def cmd_start(message: types.Message):
     print(f"🔥 Команда /start от {message.from_user.id}", file=sys.stderr)
@@ -379,22 +335,17 @@ async def cmd_start_mafia(message: types.Message, state: FSMContext):
         await message.answer("Недостаточно игроков (нужно минимум 4).")
         return
 
-    # Рассылаем роли в личку
     for uid, p in game.players.items():
         try:
             await bot.send_message(uid, f"🃏 Твоя роль: *{p['role']}*", parse_mode='Markdown')
         except:
             await message.answer(f"Не удалось отправить личное сообщение игроку {p['name']}.")
-
     await message.answer("🌙 Наступает ночь. Игроки с активными ролями, проверьте личные сообщения.")
     await start_night_cycle(message, game, state)
 
-# ===== НОЧНОЙ ЦИКЛ =====
 async def start_night_cycle(message: types.Message, game: MafiaGame, state: FSMContext):
     chat_id = message.chat.id
     game.night_actions = {}
-
-    # Отправляем инлайн-клавиатуры всем, у кого есть ночные роли
     for role in NIGHT_ROLES:
         players_with_role = game.get_players_by_role(role, alive_only=True)
         if not players_with_role:
@@ -411,27 +362,21 @@ async def start_night_cycle(message: types.Message, game: MafiaGame, state: FSMC
                 await bot.send_message(uid, f"🌙 Ночь. Ты — *{role}*. Выбери цель:", reply_markup=markup, parse_mode='Markdown')
             except:
                 pass
-
-    # Ждём 60 секунд
     await asyncio.sleep(60)
-
     killed_ids = game.resolve_night()
     dead_names = game.apply_deaths(killed_ids)
     if dead_names:
         await bot.send_message(chat_id, f"☠️ Утром обнаружены тела:\n" + "\n".join(dead_names))
     else:
         await bot.send_message(chat_id, "☀️ Утро наступило, все живы.")
-
     winner = game.check_winner()
     if winner:
         await bot.send_message(chat_id, f"🏆 Игра окончена! Победили: {winner}!")
         del games[chat_id]
         return
-
     game.phase = 'day'
     await start_day_vote(message, game, state)
 
-# ===== ДНЕВНОЕ ГОЛОСОВАНИЕ =====
 async def start_day_vote(message: types.Message, game: MafiaGame, state: FSMContext):
     chat_id = message.chat.id
     game.day_votes = {}
@@ -440,15 +385,12 @@ async def start_day_vote(message: types.Message, game: MafiaGame, state: FSMCont
         await bot.send_message(chat_id, "❓ Нет живых игроков. Игра завершена.")
         del games[chat_id]
         return
-
     markup = InlineKeyboardMarkup(row_width=2)
     for uid in alive:
         name = game.players[uid]['name'][:15]
         markup.insert(InlineKeyboardButton(name, callback_data=f"vote_{uid}"))
     await bot.send_message(chat_id, "🗳️ День. Голосуйте за исключение игрока (таймер 60 секунд):", reply_markup=markup)
-
     await asyncio.sleep(60)
-
     votes = game.day_votes
     if not votes:
         await bot.send_message(chat_id, "Никто не голосовал. Никого не исключили.")
@@ -464,17 +406,14 @@ async def start_day_vote(message: types.Message, game: MafiaGame, state: FSMCont
             await bot.send_message(chat_id, f"☠️ По результатам голосования исключён {game.players[executed]['name']} (роль: {game.players[executed]['role']}).")
         else:
             await bot.send_message(chat_id, "Голоса разделились – никто не исключён.")
-
     winner = game.check_winner()
     if winner:
         await bot.send_message(chat_id, f"🏆 Игра окончена! Победили: {winner}!")
         del games[chat_id]
         return
-
     game.phase = 'night'
     await start_night_cycle(message, game, state)
 
-# ===== ОБРАБОТКА ИНЛАЙН-КНОПОК =====
 @dp.callback_query_handler(lambda c: c.data.startswith('night_'))
 async def night_callback(callback: types.CallbackQuery):
     _, role, target_id = callback.data.split('_')
@@ -485,11 +424,9 @@ async def night_callback(callback: types.CallbackQuery):
     if not game:
         await callback.answer("Игра не найдена.")
         return
-
     if user_id not in game.players or not game.players[user_id]['alive'] or game.players[user_id]['role'] != role:
         await callback.answer("Вы не можете выполнить это действие.")
         return
-
     if role == 'мафия':
         game.set_mafia_kill(target_id)
     elif role == 'дон':
@@ -518,7 +455,6 @@ async def night_callback(callback: types.CallbackQuery):
             game.night_actions['sniper_kill'] = target_id
     elif role == 'оборотень':
         game.set_werewolf_kill(target_id)
-
     await callback.answer("Действие принято.")
     await callback.message.edit_text(f"✅ Ты выбрал цель. Жди результатов.")
 
@@ -535,9 +471,18 @@ async def vote_callback(callback: types.CallbackQuery):
     if user_id not in game.players or not game.players[user_id]['alive']:
         await callback.answer("Вы не можете голосовать.")
         return
-
     game.day_votes[user_id] = target_id
     await callback.answer("Голос учтён.")
     await callback.message.edit_text(f"✅ Ты проголосовал за {game.players[target_id]['name']}.")
 
-# ===== УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ДЛЯ ОТЛАД
+@dp.message_handler()
+async def debug_handler(message: types.Message):
+    print(f"📩 Получено сообщение: {message.text} от {message.from_user.id}", file=sys.stderr)
+
+async def on_startup(dp):
+    await bot.delete_webhook()
+    print("✅ Webhook удалён, запускаем polling...", file=sys.stderr)
+
+if __name__ == '__main__':
+    print("✅ Бот запускается...", file=sys.stderr)
+    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
